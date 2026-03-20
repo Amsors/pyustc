@@ -247,11 +247,9 @@ class DepartmentDB:
                         )
                     
                     conn.commit()
-                    print(f"[DepartmentDB] Inserted {len(rows_to_insert)} records", file=sys.stderr)
 
             # Success: remove backup
             self._remove_backup(backup_path)
-            print(f"[DepartmentDB] Import completed successfully", file=sys.stderr)
 
         except Exception as e:
             # Restore backup on failure
@@ -319,7 +317,9 @@ class SecondClassDB:
                         is_series INTEGER NOT NULL,
                         children_id TEXT,
                         parent_id TEXT,
-                        scan_timestamp INTEGER NOT NULL
+                        scan_timestamp INTEGER NOT NULL,
+                        deep_scaned BOOLEAN NOT NULL,
+                        deep_scaned_time INTEGER
                     )
                 """)
 
@@ -345,7 +345,9 @@ class SecondClassDB:
                         is_series INTEGER NOT NULL,
                         children_id TEXT,
                         parent_id TEXT,
-                        scan_timestamp INTEGER NOT NULL
+                        scan_timestamp INTEGER NOT NULL,
+                        deep_scaned BOOLEAN NOT NULL,
+                        deep_scaned_time INTEGER
                     )
                 """)
 
@@ -400,6 +402,8 @@ class SecondClassDB:
         children_ids: list[str] | None = None,
         parent_id: str | None = None,
         scan_timestamp: int | None = None,
+        deep_scaned: bool = False,
+        deep_scaned_time: int | None = None,
     ) -> dict[str, Any]:
         """Convert SecondClass to a database row dict."""
         timestamp = scan_timestamp or int(time.time())
@@ -428,6 +432,8 @@ class SecondClassDB:
             "children_id": json.dumps(children_ids) if children_ids is not None else None,
             "parent_id": parent_id,
             "scan_timestamp": timestamp,
+            "deep_scaned": deep_scaned,
+            "deep_scaned_time": deep_scaned_time or None,
         }
 
     def _create_backup(self) -> Path | None:
@@ -471,7 +477,8 @@ class SecondClassDB:
     async def update_all_secondclass(
         self,
         secondclasses: list[SecondClass],
-        expand_series: bool = False,
+        deep_update: bool,
+        expand_series: bool = False
     ):
         """Update the all_secondclass table with full refresh.
 
@@ -486,7 +493,6 @@ class SecondClassDB:
         :raises RuntimeError: If the update fails and cannot be rolled back.
         """
         import sys
-        print(f"[DB Debug] update_all_secondclass called with {len(secondclasses)} classes, expand_series={expand_series}", file=sys.stderr)
         
         scan_timestamp = int(time.time())
         rows_to_insert: list[dict[str, Any]] = []
@@ -495,6 +501,9 @@ class SecondClassDB:
         # Process each secondclass
         for sc in secondclasses:
             all_ids.add(sc.id)
+
+            if deep_update:
+                await sc.update(need_log=True)
 
             children_ids: list[str] | None = None
             parent_id: str | None = None
@@ -507,6 +516,8 @@ class SecondClassDB:
                     for child in children:
                         if child.id not in all_ids:
                             all_ids.add(child.id)
+                            if deep_update:
+                                await child.update();
                             child_row = self._secondclass_to_row(
                                 child,
                                 children_ids=None,
@@ -523,14 +534,15 @@ class SecondClassDB:
                 children_ids=children_ids,
                 parent_id=parent_id,
                 scan_timestamp=scan_timestamp,
+                deep_scaned=deep_update,
+                deep_scaned_time=scan_timestamp if deep_update else None,
             )
             rows_to_insert.append(row)
 
         print(f"[DB Debug] Prepared {len(rows_to_insert)} rows to insert, {len(all_ids)} unique IDs", file=sys.stderr)
-        
+
         # Create backup before updating
         backup_path = self._create_backup()
-        print(f"[DB Debug] Backup created: {backup_path}", file=sys.stderr)
 
         try:
             with self._lock:
@@ -550,7 +562,6 @@ class SecondClassDB:
                         print(f"[DB Debug] Deleted all records (empty batch)", file=sys.stderr)
 
                     # Insert or replace all records
-                    print(f"[DB Debug] Inserting {len(rows_to_insert)} records...", file=sys.stderr)
                     for row in rows_to_insert:
                         cursor.execute(
                             """
@@ -558,19 +569,20 @@ class SecondClassDB:
                                 id, name, status, create_time, apply_time, hold_time,
                                 tel, valid_hour, apply_num, apply_limit, applied,
                                 need_sign_info, module, department, labels, conceive,
-                                is_series, children_id, parent_id, scan_timestamp
+                                is_series, children_id, parent_id, scan_timestamp,
+                                deep_scaned, deep_scaned_time
                             ) VALUES (
                                 :id, :name, :status, :create_time, :apply_time, :hold_time,
                                 :tel, :valid_hour, :apply_num, :apply_limit, :applied,
                                 :need_sign_info, :module, :department, :labels, :conceive,
-                                :is_series, :children_id, :parent_id, :scan_timestamp
+                                :is_series, :children_id, :parent_id, :scan_timestamp,
+                                :deep_scaned, :deep_scaned_time
                             )
                             """,
                             row,
                         )
 
                     conn.commit()
-                    print(f"[DB Debug] Committed successfully", file=sys.stderr)
 
             # Success: remove backup
             self._remove_backup(backup_path)
@@ -578,13 +590,13 @@ class SecondClassDB:
 
         except Exception as e:
             # Restore backup on failure
-            print(f"[DB Debug] Exception occurred: {e}", file=sys.stderr)
             self._restore_backup(backup_path)
             raise RuntimeError(f"Failed to update all_secondclass: {e}") from e
 
     async def update_enrolled_secondclass(
         self,
         secondclasses: list[SecondClass],
+        deep_update: bool
     ):
         """Update the enrolled_secondclass table with full refresh.
 
@@ -596,7 +608,6 @@ class SecondClassDB:
         :raises RuntimeError: If the update fails and cannot be rolled back.
         """
         import sys
-        print(f"[DB Debug] update_enrolled_secondclass called with {len(secondclasses)} classes", file=sys.stderr)
         
         scan_timestamp = int(time.time())
         rows_to_insert: list[dict[str, Any]] = []
@@ -605,12 +616,18 @@ class SecondClassDB:
         # Process each secondclass
         for sc in secondclasses:
             all_ids.add(sc.id)
+
+            if deep_update:
+                await sc.update()
+
             # For enrolled table, we don't track parent-child relationships
             row = self._secondclass_to_row(
                 sc,
                 children_ids=None,
                 parent_id=None,
                 scan_timestamp=scan_timestamp,
+                deep_scaned=False,
+                deep_scaned_time=scan_timestamp if deep_update else None,
             )
             rows_to_insert.append(row)
 
@@ -618,7 +635,6 @@ class SecondClassDB:
         
         # Create backup before updating
         backup_path = self._create_backup()
-        print(f"[DB Debug] Backup created: {backup_path}", file=sys.stderr)
 
         try:
             with self._lock:
@@ -632,13 +648,10 @@ class SecondClassDB:
                             f"DELETE FROM enrolled_secondclass WHERE id NOT IN ({placeholders})",
                             list(all_ids),
                         )
-                        print(f"[DB Debug] Deleted records not in current batch", file=sys.stderr)
                     else:
                         cursor.execute("DELETE FROM enrolled_secondclass")
-                        print(f"[DB Debug] Deleted all records (empty batch)", file=sys.stderr)
 
                     # Insert or replace all records
-                    print(f"[DB Debug] Inserting {len(rows_to_insert)} records...", file=sys.stderr)
                     for row in rows_to_insert:
                         cursor.execute(
                             """
@@ -646,12 +659,16 @@ class SecondClassDB:
                                 id, name, status, create_time, apply_time, hold_time,
                                 tel, valid_hour, apply_num, apply_limit, applied,
                                 need_sign_info, module, department, labels, conceive,
-                                is_series, children_id, parent_id, scan_timestamp
+                                is_series, children_id, parent_id, scan_timestamp,
+                                is_series, children_id, parent_id, scan_timestamp,
+                                deep_scaned, deep_scaned_time
                             ) VALUES (
                                 :id, :name, :status, :create_time, :apply_time, :hold_time,
                                 :tel, :valid_hour, :apply_num, :apply_limit, :applied,
                                 :need_sign_info, :module, :department, :labels, :conceive,
-                                :is_series, :children_id, :parent_id, :scan_timestamp
+                                :is_series, :children_id, :parent_id, :scan_timestamp,
+                                :is_series, :children_id, :parent_id, :scan_timestamp,
+                                :deep_scaned, :deep_scaned_time
                             )
                             """,
                             row,
@@ -662,7 +679,6 @@ class SecondClassDB:
 
             # Success: remove backup
             self._remove_backup(backup_path)
-            print(f"[DB Debug] Backup removed, update completed successfully", file=sys.stderr)
 
         except Exception as e:
             # Restore backup on failure
@@ -690,7 +706,8 @@ class SecondClassDB:
     async def update_all_from_generator(
         self,
         sc_generator,
-        expand_series: bool = False,
+        deep_update: bool,
+        expand_series: bool,
     ):
         """Update the all_secondclass table from an async generator.
 
@@ -714,9 +731,13 @@ class SecondClassDB:
         secondclasses = []
         async for sc in sc_generator:
             secondclasses.append(sc)
-        await self.update_all_secondclass(secondclasses, expand_series=expand_series)
+        await self.update_all_secondclass(secondclasses, expand_series=expand_series, deep_update=deep_update)
 
-    async def update_enrolled_from_generator(self, sc_generator):
+    async def update_enrolled_from_generator(
+            self,
+            sc_generator,
+            deep_update: bool,
+    ):
         """Update the enrolled_secondclass table from an async generator.
 
         This is a convenience method that collects items from an async generator
@@ -736,7 +757,7 @@ class SecondClassDB:
         secondclasses = []
         async for sc in sc_generator:
             secondclasses.append(sc)
-        await self.update_enrolled_secondclass(secondclasses)
+        await self.update_enrolled_secondclass(secondclasses, deep_update=deep_update)
 
     def close(self):
         """Close the database connection (no-op for sqlite3, but kept for API consistency)."""

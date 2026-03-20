@@ -148,6 +148,50 @@ class SecondClass(metaclass=singleton_by_key_meta(lambda id, data: id)):  # type
             if not max:
                 break
 
+    @classmethod
+    async def get_departments(cls):
+        """Get the department tree of USTC.
+
+        :return: The department tree of USTC, in the format of a json list.
+        :type: list[dict[str, Any]]
+        """
+        url = "/sysdepart/sysDepart/queryTreeList"
+        data = await get_service().request(url, "get")
+        if data["success"]:
+            return data.get("result")
+        return []
+
+    @classmethod
+    async def get_secondclass_by_id(cls, id: str, service=None):
+        """Get a SecondClass by its ID.
+        
+        Args:
+            id: The activity ID.
+            service: Optional YouthService instance. If not provided, will try to get from context.
+            
+        Returns:
+            SecondClass instance.
+            
+        Raises:
+            RuntimeError: If failed to get the activity or not in YouthService context.
+        """
+        url = "/item/scItem/queryById"
+        params = {"id": id}
+        
+        # Use provided service or get from context
+        if service is None:
+            service = get_service()
+        
+        try:
+            result = await service.get_result(url, params=params)
+            sc = cls(id, result)
+            return sc
+        except RuntimeError as e:
+            # Re-raise with more context
+            raise RuntimeError(f"Failed to get secondclass by id '{id}': {e}") from e
+        except Exception as e:
+            raise RuntimeError(f"Unexpected error when getting secondclass by id '{id}': {e}") from e
+
     @property
     def name(self) -> str:
         return self.data["itemName"]
