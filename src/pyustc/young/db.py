@@ -503,7 +503,7 @@ class SecondClassDB:
             all_ids.add(sc.id)
 
             if deep_update:
-                await sc.update(need_log=True)
+                await sc.update()
 
             children_ids: list[str] | None = None
             parent_id: str | None = None
