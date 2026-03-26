@@ -142,7 +142,6 @@ class SecondClass(metaclass=singleton_by_key_meta(lambda id, data: id)):  # type
         async for sc in cls._fetch(
             cls._get_filter(name_or_filter), "/item/scParticipateItem/list", size
         ):
-            del sc.data["applyNum"]
             yield sc
             max -= 1
             if not max:
