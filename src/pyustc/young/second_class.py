@@ -165,7 +165,6 @@ class SecondClass(metaclass=singleton_by_key_meta(lambda id, data: id)):  # type
         async for sc in cls._fetch(
             cls._get_filter(name_or_filter), "/item/scParticipateItem/list", size
         ):
-            del sc.data["applyNum"]
             yield sc
             max -= 1
             if not max:
@@ -215,16 +214,16 @@ class SecondClass(metaclass=singleton_by_key_meta(lambda id, data: id)):  # type
         return self.data["tel"]
 
     @property
-    def valid_hour(self) -> float:
-        return self.data["validHour"]
+    def valid_hour(self) -> float | None:
+        return self.data.get("validHour", None)
 
     @property
     def apply_num(self) -> int | None:
         return self.data.get("applyNum")
 
     @property
-    def apply_limit(self) -> int:
-        return self.data["peopleNum"]
+    def apply_limit(self) -> int | None:
+        return self.data.get("peopleNum", None)
 
     @property
     def applied(self) -> bool:
@@ -263,7 +262,7 @@ class SecondClass(metaclass=singleton_by_key_meta(lambda id, data: id)):  # type
         if "lableNames" not in self.data:
             return None
         return list(
-            map(Label, self.data["itemLable"].split(","), self.data["lableNames"])
+            map(Label, self.data["itemLable"].split(","), self.data["lableNames"].split(","))
         )
 
     @property
