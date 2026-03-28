@@ -40,6 +40,29 @@ class Status(Enum):
         return f"<Status {self.code} {self.text!r}>"
 
 
+class ParticipationForm(Enum):
+    SUBMIT_WORKS = "1", "提交作品"
+    ON_SITE = "0", "现场参与"
+
+    @property
+    def code_str(self):
+        return self.value[0]
+
+    @property
+    def text(self):
+        return self.value[1]
+
+    @classmethod
+    def from_code_str(cls, code: str):
+        for form in cls:
+            if form.code_str == code:
+                return form
+        raise ValueError(f"Unknown participation form code: {code}")
+
+    def __repr__(self):
+        return f"<ParticipationForm {self.code_str} {self.text!r}>"
+
+
 class SignInfo:
     def __init__(
         self, college: str, classes: str, phone: str, email: str = "", remarks: str = ""
@@ -148,6 +171,19 @@ class SecondClass(metaclass=singleton_by_key_meta(lambda id, data: id)):  # type
             if not max:
                 break
 
+    @classmethod
+    async def get_departments(cls):
+        """Get the department tree of USTC.
+
+        :return: The department tree of USTC, in the format of a json list.
+        :type: list[dict[str, Any]]
+        """
+        url = "/sysdepart/sysDepart/queryTreeList"
+        data = await get_service().request(url, "get")
+        if data["success"]:
+            return data.get("result")
+        return []
+
     @property
     def name(self) -> str:
         return self.data["itemName"]
@@ -237,6 +273,16 @@ class SecondClass(metaclass=singleton_by_key_meta(lambda id, data: id)):  # type
     @property
     def is_series(self) -> bool:
         return self.data["itemCategory"] == "1"
+
+    @property
+    def place_info(self) -> str | None:
+        return self.data.get("placeInfo")
+
+    @property
+    def participation_form(self) -> ParticipationForm | None:
+        if "form" not in self.data:
+            return None
+        return ParticipationForm.from_code_str(self.data.get("form"))
 
     async def get_children(self) -> list[Self]:
         if not self.is_series:
