@@ -283,6 +283,10 @@ class SecondClass(metaclass=singleton_by_key_meta(lambda id, data: id)):  # type
             return None
         return ParticipationForm.from_code_str(self.data.get("form"))
 
+    @property
+    def description(self) -> str | None:
+        return self.data.get("baseContent")
+
     async def get_children(self) -> list[Self]:
         if not self.is_series:
             return []
